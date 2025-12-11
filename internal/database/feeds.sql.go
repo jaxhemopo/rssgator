@@ -55,13 +55,33 @@ func (q *Queries) CreateFeed(ctx context.Context, arg CreateFeedParams) (Feed, e
 	return i, err
 }
 
-const ListAllFeeds = `-- name: ListAllFeeds :many
+const getFeedByURL = `-- name: GetFeedByURL :one
+SELECT id, created_at, updated_at, name, url, user_id
+FROM feeds
+WHERE url = $1
+`
+
+func (q *Queries) GetFeedByURL(ctx context.Context, url string) (Feed, error) {
+	row := q.db.QueryRowContext(ctx, getFeedByURL, url)
+	var i Feed
+	err := row.Scan(
+		&i.ID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Name,
+		&i.Url,
+		&i.UserID,
+	)
+	return i, err
+}
+
+const listAllFeeds = `-- name: ListAllFeeds :many
 SELECT id, created_at, updated_at, name, url, user_id
 FROM feeds
 `
 
 func (q *Queries) ListAllFeeds(ctx context.Context) ([]Feed, error) {
-	rows, err := q.db.QueryContext(ctx, ListAllFeeds)
+	rows, err := q.db.QueryContext(ctx, listAllFeeds)
 	if err != nil {
 		return nil, err
 	}

@@ -52,8 +52,11 @@ func main() {
 	cmdRegistry.Register("reset", commands.HandlerReset)
 	cmdRegistry.Register("users", commands.HandlerGetUsers)
 	cmdRegistry.Register("agg", commands.AggsHandler)
-	cmdRegistry.Register("addfeed", commands.AddFeedHandler)
+	cmdRegistry.Register("addfeed", commands.MiddlewareLoggedIn(commands.AddFeedHandler))
 	cmdRegistry.Register("feeds", commands.FeedsHandler)
+	cmdRegistry.Register("follow", commands.MiddlewareLoggedIn(commands.HandlerFollow))
+	cmdRegistry.Register("following", commands.MiddlewareLoggedIn(commands.HandlerFollowing))
+	cmdRegistry.Register("unfollow", commands.MiddlewareLoggedIn(commands.HandlerUnfollow))
 
 	err = cmdRegistry.Run(appState, cliCmd)
 	if err != nil {

@@ -29,6 +29,21 @@ type Commands struct {
 
 const GatorURLfeed = "https://www.wagslane.dev/index.xml"
 
+func MiddlewareLoggedIn(handler func(s *State, cmd Command, user database.User) error) func(*State, Command) error {
+	return func(s *State, cmd Command) error {
+		if s.Config.CurrentUserName == "" {
+			fmt.Printf("no user logged in. Please login first.\n")
+			os.Exit(1)
+		}
+		user, err := s.DB.GetUser(context.Background(), s.Config.CurrentUserName)
+		if err != nil {
+			fmt.Printf("failed to get user: %v", err)
+			os.Exit(1)
+		}
+		return handler(s, cmd, user)
+	}
+}
+
 func (c *Commands) Run(s *State, cmd Command) error {
 	if handler, ok := c.Handlers[cmd.Name]; !ok {
 		return fmt.Errorf("unknown Command: %s", cmd.Name)
@@ -45,7 +60,7 @@ func (c *Commands) Register(name string, f func(*State, Command) error) {
 	c.Handlers[name] = f
 }
 
-func AddFeedHandler(s *State, cmd Command) error {
+func AddFeedHandler(s *State, cmd Command, user database.User) error {
 	if len(cmd.Args) < 2 {
 		fmt.Printf("feed name and url required")
 		os.Exit(1)
@@ -54,12 +69,6 @@ func AddFeedHandler(s *State, cmd Command) error {
 	timeNow := time.Now()
 	feedname := cmd.Args[0]
 	feedurl := cmd.Args[1]
-
-	user, err := s.DB.GetUser(context.Background(), s.Config.CurrentUserName)
-	if err != nil {
-		fmt.Printf("failed to get user: %v", err)
-		os.Exit(1)
-	}
 
 	params := database.CreateFeedParams{
 		ID:        id,
@@ -70,7 +79,7 @@ func AddFeedHandler(s *State, cmd Command) error {
 		UserID:    user.ID,
 	}
 
-	_, err = s.DB.CreateFeed(context.Background(), params)
+	_, err := s.DB.CreateFeed(context.Background(), params)
 
 	if err != nil {
 		if strings.Contains(err.Error(), "duplicate key value") {
@@ -80,6 +89,23 @@ func AddFeedHandler(s *State, cmd Command) error {
 		fmt.Printf("failed to create feed: %v", err)
 		return err
 	}
+
+	createFollowParams := database.CreateFeedFollowParams{
+		ID:        uuid.New(),
+		CreatedAt: timeNow,
+		UpdatedAt: timeNow,
+		FeedID:    params.ID,
+		UserID:    user.ID,
+	}
+
+	_, err = s.DB.CreateFeedFollow(context.Background(), createFollowParams)
+	if err != nil {
+		fmt.Printf("failed to create feed follow: %v", err)
+		return err
+	} else {
+		fmt.Printf("You are now following feed %s\n", feedname)
+	}
+
 	fmt.Printf("Feed %s added successfully\n", cmd.Args[0])
 	fmt.Printf("%d", params.ID)
 	fmt.Printf("%s", params.Name)
@@ -87,6 +113,7 @@ func AddFeedHandler(s *State, cmd Command) error {
 	fmt.Printf("%s", params.CreatedAt)
 	fmt.Printf("%s", params.UpdatedAt)
 	fmt.Printf("%d", params.UserID)
+
 	return nil
 }
 
@@ -134,6 +161,82 @@ func HandlerReset(s *State, cmd Command) error {
 		os.Exit(1)
 	}
 	fmt.Printf("All users have been reset successfully\n")
+	return nil
+}
+
+func HandlerFollow(s *State, cmd Command, user database.User) error {
+	if len(cmd.Args) < 1 {
+		fmt.Printf("URL required")
+		os.Exit(1)
+	}
+	feedurl := cmd.Args[0]
+	feed, err := s.DB.GetFeedByURL(context.Background(), feedurl)
+	if err != nil {
+		fmt.Printf("failed to get feed: %v", err)
+		os.Exit(1)
+	}
+
+	timeNow := time.Now()
+	params := database.CreateFeedFollowParams{
+		ID:        uuid.New(),
+		CreatedAt: timeNow,
+		UpdatedAt: timeNow,
+		FeedID:    feed.ID,
+		UserID:    user.ID,
+	}
+	_, err = s.DB.CreateFeedFollow(context.Background(), params)
+	if err != nil {
+		if strings.Contains(err.Error(), "duplicate key value") {
+			fmt.Printf("You are already following feed %s\n", feed.Name)
+			os.Exit(1)
+		}
+		fmt.Printf("failed to follow feed: %v", err)
+		return err
+	}
+	fmt.Printf("%s is now following feed %s\n", user.Name, feed.Name)
+
+	return nil
+}
+
+func HandlerFollowing(s *State, cmd Command, user database.User) error {
+	feedFollows, err := s.DB.GetFeedFollowsForUser(context.Background(), user.ID)
+	if err != nil {
+		fmt.Printf("failed to get feed follows: %v", err)
+		os.Exit(1)
+	}
+	if len(feedFollows) == 0 {
+		fmt.Printf("You are not following any feeds\n")
+		return nil
+	}
+	fmt.Printf("Feeds followed by %s:\n", user.Name)
+	for _, feedFollow := range feedFollows {
+		fmt.Printf("- '%s' \n", feedFollow.FeedName)
+	}
+	return nil
+}
+
+func HandlerUnfollow(s *State, cmd Command, user database.User) error {
+	if len(cmd.Args) < 1 {
+		fmt.Printf("Feed ID required")
+		os.Exit(1)
+	}
+	feed, err := s.DB.GetFeedByURL(context.Background(), cmd.Args[0])
+	if err != nil {
+		fmt.Printf("failed to get feed: %v", err)
+		os.Exit(1)
+	}
+
+	unfollowparams := database.DeleteFeedFollowParams{
+		FeedID: feed.ID,
+		UserID: user.ID,
+	}
+
+	err = s.DB.DeleteFeedFollow(context.Background(), unfollowparams)
+	if err != nil {
+		fmt.Printf("failed to unfollow feed: %v", err)
+		os.Exit(1)
+	}
+	fmt.Printf("%s has unfollowed feed %s\n", user.Name, feed.Name)
 	return nil
 }
 
