@@ -4,13 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jaxhemopo/rssgator/internal/aggregator"
 	"github.com/jaxhemopo/rssgator/internal/config"
 	"github.com/jaxhemopo/rssgator/internal/database"
-	"github.com/jaxhemopo/rssgator/internal/rss"
 )
 
 type State struct {
@@ -140,16 +141,76 @@ func FeedsHandler(s *State, cmd Command) error {
 }
 
 func AggsHandler(s *State, cmd Command) error {
-	feed, err := rss.FetchFeed(context.Background(), GatorURLfeed)
-	if err != nil {
-		fmt.Printf("failed to fetch feed: %v", err)
+	if len(cmd.Args) < 1 {
+		fmt.Printf("timeout in seconds required")
 		os.Exit(1)
 	}
-	fmt.Printf("%s\n", feed.Channel.Title)
-	fmt.Printf("%s\n", feed.Channel.Description)
-	fmt.Printf("Items:\n")
-	for _, item := range feed.Channel.Item {
-		fmt.Printf("%s (%s) %s\n", item.Title, item.PubDate, item.Description)
+	durationString := cmd.Args[0]
+
+	timeBetweenRequests, err := time.ParseDuration(durationString)
+	if err != nil {
+		fmt.Printf("failed to parse duration: %v", err)
+		os.Exit(1)
+	}
+
+	if timeBetweenRequests < 1*time.Second {
+		fmt.Printf("duration must be at least 1 second")
+		os.Exit(1)
+	}
+
+	fmt.Printf("Collecting Feeds every %s\n", timeBetweenRequests.String())
+
+	ticker := time.NewTicker(timeBetweenRequests)
+
+	go aggregator.ScrapeFeeds(context.Background(), s.DB)
+
+	for ; ; <-ticker.C {
+		go aggregator.ScrapeFeeds(context.Background(), s.DB)
+	}
+}
+
+const defaultPostLimit = 2
+
+func HandlerBrowse(s *State, cmd Command, user database.User) error {
+	limit := defaultPostLimit
+	if len(cmd.Args) >= 1 {
+		var err error
+		l, err := strconv.Atoi(cmd.Args[0])
+		if err != nil {
+			fmt.Printf("invalid limit argument: %v", err)
+			return err
+		}
+		if l > 0 {
+			limit = l
+		}
+	}
+	posts, err := s.DB.GetPostsForUser(context.Background(), database.GetPostsForUserParams{
+		UserID: user.ID,
+		Limit:  int32(limit),
+	})
+	if err != nil {
+		fmt.Printf("failed to get posts: %v", err)
+		return err
+	}
+	if len(posts) == 0 {
+		fmt.Printf("No posts found\n")
+		return nil
+	}
+	fmt.Printf("Posts for %s:\n", user.Name)
+	for _, post := range posts {
+		fmt.Printf("- '%s\n", post.Title)
+		fmt.Printf("  URL: %s\n", post.Url)
+		if post.Description.Valid {
+			desc := post.Description.String
+			if len(desc) > 100 {
+				desc = desc[:100] + "..."
+			}
+			fmt.Printf("  Description: %s\n", desc)
+		}
+		if post.PublishedAt.Valid {
+			fmt.Printf("  Published At: %s\n", post.PublishedAt.Time.Local().Format(time.RFC1123))
+		}
+		fmt.Printf("----------------------\n")
 	}
 	return nil
 }

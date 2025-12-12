@@ -57,6 +57,7 @@ func main() {
 	cmdRegistry.Register("follow", commands.MiddlewareLoggedIn(commands.HandlerFollow))
 	cmdRegistry.Register("following", commands.MiddlewareLoggedIn(commands.HandlerFollowing))
 	cmdRegistry.Register("unfollow", commands.MiddlewareLoggedIn(commands.HandlerUnfollow))
+	cmdRegistry.Register("browse", commands.MiddlewareLoggedIn(commands.HandlerBrowse))
 
 	err = cmdRegistry.Run(appState, cliCmd)
 	if err != nil {

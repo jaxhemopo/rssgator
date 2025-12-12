@@ -2,11 +2,13 @@ package rss
 
 import (
 	"context"
+	"database/sql"
 	"encoding/xml"
 	"fmt"
 	"html"
 	"io"
 	"net/http"
+	"time"
 )
 
 type RSSFeed struct {
@@ -23,6 +25,18 @@ type RSSItem struct {
 	Link        string `xml:"link"`
 	Description string `xml:"description"`
 	PubDate     string `xml:"pubDate"`
+}
+
+func ParsePubDate(dateStr string) (sql.NullTime, error) {
+	if dateStr == "" {
+		return sql.NullTime{Valid: false}, nil
+	}
+	t, err := time.Parse(time.RFC1123Z, dateStr)
+	if err != nil {
+		return sql.NullTime{Valid: false}, fmt.Errorf("failed to parse pubDate: %v", err)
+	}
+
+	return sql.NullTime{Time: t.UTC(), Valid: true}, nil
 }
 
 func FetchFeed(ctx context.Context, feedURL string) (*RSSFeed, error) {
